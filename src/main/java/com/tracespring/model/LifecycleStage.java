@@ -1,0 +1,17 @@
+package com.tracespring.model;
+
+/**
+ * Ordered stages of a Spring MVC request lifecycle.
+ * Sequence: FILTER_START → REQUEST_RECEIVED → INTERCEPTOR_PRE_HANDLE
+ *           → CONTROLLER_EXECUTION → INTERCEPTOR_POST_HANDLE
+ *           → INTERCEPTOR_AFTER_COMPLETION → RESPONSE_SENT
+ */
+public enum LifecycleStage {
+    FILTER_START,
+    REQUEST_RECEIVED,
+    INTERCEPTOR_PRE_HANDLE,
+    CONTROLLER_EXECUTION,
+    INTERCEPTOR_POST_HANDLE,
+    INTERCEPTOR_AFTER_COMPLETION,
+    RESPONSE_SENT
+}
