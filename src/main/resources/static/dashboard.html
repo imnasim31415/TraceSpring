@@ -35,11 +35,13 @@
             cursor: pointer; border: 1px solid; font-weight: 500; transition: opacity 0.15s;
         }
         .btn:hover { opacity: 0.85; }
-        .btn-pause  { background: #1e3a5f; border-color: #2563eb; color: #93c5fd; }
-        .btn-resume { background: #064e3b; border-color: #059669; color: #34d399; }
-        .btn-clear  { background: #1e1e2e; border-color: var(--border); color: var(--muted); }
-        .btn-guide  { background: #1e293b; border-color: var(--border); color: var(--muted); }
+        .btn-pause    { background: #1e3a5f; border-color: #2563eb; color: #93c5fd; }
+        .btn-resume   { background: #064e3b; border-color: #059669; color: #34d399; }
+        .btn-clear    { background: #1e1e2e; border-color: var(--border); color: var(--muted); }
+        .btn-guide    { background: #1e293b; border-color: var(--border); color: var(--muted); }
         .btn-guide.active { border-color: var(--accent); color: #93c5fd; }
+        .btn-traffic  { background: #2e1065; border-color: #7c3aed; color: #c084fc; }
+        .btn-traffic.firing { background: #1a0a3d; border-color: #4c1d95; color: #7c3aed; cursor: not-allowed; }
 
         /* ── Live indicator ── */
         .live-badge {
@@ -183,6 +185,7 @@
     </div>
     <div class="header-actions">
         <button id="btn-pause" class="btn btn-pause" onclick="togglePause()">⏸ Pause</button>
+        <button id="btn-traffic" class="btn btn-traffic" onclick="generateTraffic()">⚡ Generate Traffic</button>
         <button class="btn btn-clear" onclick="clearView()">⌫ Clear view</button>
         <button id="btn-guide" class="btn btn-guide" onclick="toggleGuide()">Guide ▾</button>
         <div class="live-badge">
@@ -693,6 +696,62 @@
             document.getElementById('lbl').textContent = 'Disconnected';
         }
     }
+
+    // ── Generate mixed traffic burst ─────────────────────────
+    window.generateTraffic = async function () {
+        const btn = document.getElementById('btn-traffic');
+        btn.textContent = '⚡ Firing…';
+        btn.classList.add('firing');
+        btn.disabled = true;
+
+        const requests = [
+            // GETs
+            () => fetch('/api/users'),
+            () => fetch('/api/users/1'),
+            () => fetch('/api/users/2'),
+            () => fetch('/api/orders/10'),
+            () => fetch('/api/orders/99'),
+            // 404 — non-existent user
+            () => fetch('/api/users/999'),
+            // 400 — bad order id
+            () => fetch('/api/orders/-5'),
+            // POST
+            () => fetch('/api/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: 'Carol', email: 'carol@example.com', role: 'USER' })
+            }),
+            // PUT
+            () => fetch('/api/users/1', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: 'Alice Updated', email: 'alice@example.com', role: 'SUPERADMIN' })
+            }),
+            // PATCH
+            () => fetch('/api/users/2', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ role: 'MODERATOR' })
+            }),
+            // DELETE
+            () => fetch('/api/users/1', { method: 'DELETE' }),
+            // DELETE non-existent → 404
+            () => fetch('/api/users/999', { method: 'DELETE' }),
+        ];
+
+        // Fire with small stagger so traces arrive in readable order
+        for (const req of requests) {
+            req().catch(() => {});          // swallow errors — tracing them is the point
+            await new Promise(r => setTimeout(r, 120));
+        }
+
+        await new Promise(r => setTimeout(r, 400));   // let final traces settle
+        await fetchTraces();
+
+        btn.textContent = '⚡ Generate Traffic';
+        btn.classList.remove('firing');
+        btn.disabled = false;
+    };
 
     fetchTraces();
     setInterval(fetchTraces, 2000);

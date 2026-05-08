@@ -341,3 +341,27 @@ App is too slow to respond. Check container health: `docker inspect tracespring`
 
 **Multi-arch build is slow**
 QEMU-based cross-compilation is slow (~5–10 min for arm64). Use GitHub Actions cache (already configured with `cache-from/cache-to: type=gha`) to skip unchanged layers.
+
+
+
+
+
+Dockerfile — two-stage build. Maven compiles in stage 1, only the JRE + fat JAR goes into the final Alpine image. Non-root user, health check, container-aware JVM flags.
+
+.github/workflows/deploy.yml — on every push to main:
+
+Builds linux/amd64 + linux/arm64 image (works on both Oracle VM types)
+Pushes :latest + :sha-<shortsha> to Docker Hub
+SSH into VM → pull → stop old container → start new one → health check → prune
+DEPLOYMENT.md — full step-by-step guide.
+
+The 5 GitHub Secrets you must set before first deploy
+Go to GitHub repo → Settings → Secrets and variables → Actions:
+
+Secret	Value
+DOCKERHUB_USERNAME	your Docker Hub username
+DOCKERHUB_TOKEN	Docker Hub access token (Account Settings → Security)
+VM_HOST	Oracle VM public IP
+VM_USER	ubuntu
+VM_SSH_KEY	contents of a new SSH private key whose public key is in ~/.ssh/authorized_keys on the VM
+Once secrets are set, push anything to main and the pipeline runs automatically. The app will be live at http://tracespring.yourdomain.com/debug/dashboard after you add the Cloudflare A record pointing the subdomain to the VM IP.

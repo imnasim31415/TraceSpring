@@ -95,7 +95,8 @@ Request headers and query params are shown alongside the timeline.
 
 **Controls:**
 - **⏸ Pause** — stops live polling; rows freeze. Click **▶ Resume** to restart (fetches immediately on resume)
-- **⌫ Clear view** — hides current rows from the table; server-side trace data is not deleted
+- **⚡ Generate Traffic** — fires 12 staggered requests covering GET, POST, PUT, PATCH, DELETE, and status codes 200, 201, 204, 400, 404 — instant mixed-method view without any manual curl
+- **⌫ Clear view** — hides current rows, resets `sessionStart` so counts restart from zero; server-side data is not deleted
 - **Guide ▾** — opens a three-column reference panel inside the dashboard (see below)
 
 ### In-Dashboard Guide
@@ -151,8 +152,8 @@ src/main/java/com/tracespring/
 │   └── WebMvcConfig                Registers LifecycleInterceptor via WebMvcConfigurer
 │
 └── controller/
-    ├── UserController              Sample endpoints: GET/POST /api/users
-    ├── OrderController             Sample endpoint: GET /api/orders/{id}
+    ├── UserController              GET, POST, PUT, PATCH, DELETE /api/users[/{id}]
+    ├── OrderController             GET /api/orders/{id}
     └── DebugController             GET /debug/traces, /debug/traces/{id}, /debug/dashboard
 ```
 
@@ -201,11 +202,17 @@ A `ConcurrentHashMap<String, RequestTrace>` backed `@Service`. The filter writes
 
 These exist purely to generate traffic with different shapes for observing the lifecycle:
 
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/api/users` | Returns a static user list. Simple read. |
-| `POST` | `/api/users` | Accepts JSON body. Tests body capture through the caching wrapper. |
-| `GET` | `/api/orders/{id}` | Path variable. Returns 400 if `id ≤ 0` — useful for observing error traces. |
+| Method | Path | Status | Purpose |
+|---|---|---|---|
+| `GET` | `/api/users` | 200 | List all users |
+| `GET` | `/api/users/{id}` | 200 / 404 | Single user — 404 if not found |
+| `POST` | `/api/users` | 201 | Create user; tests body capture through caching wrapper |
+| `PUT` | `/api/users/{id}` | 200 / 404 | Full replace — observe same lifecycle for write ops |
+| `PATCH` | `/api/users/{id}` | 200 / 404 | Partial update |
+| `DELETE` | `/api/users/{id}` | 204 / 404 | Delete — 204 No Content on success |
+| `GET` | `/api/orders/{id}` | 200 / 400 | Returns 400 if `id ≤ 0` — useful for observing error traces |
+
+The **⚡ Generate Traffic** button in the dashboard fires all of these in one burst, including intentional 400 and 404 responses, so you see mixed methods and status codes immediately.
 
 ---
 
@@ -232,11 +239,22 @@ App starts on port **8082**.
 # open the dashboard
 open http://localhost:8082/debug/dashboard
 
-# generate some traffic
+# quickest path: click "⚡ Generate Traffic" in the dashboard
+# — fires 12 mixed requests automatically
+
+# or drive traffic manually
 curl http://localhost:8082/api/users
+curl http://localhost:8082/api/users/1
 curl -X POST http://localhost:8082/api/users \
      -H "Content-Type: application/json" \
-     -d '{"name":"Alice","email":"alice@example.com"}'
+     -d '{"name":"Carol","email":"carol@example.com"}'
+curl -X PUT http://localhost:8082/api/users/1 \
+     -H "Content-Type: application/json" \
+     -d '{"name":"Alice Updated","email":"alice@example.com","role":"SUPERADMIN"}'
+curl -X PATCH http://localhost:8082/api/users/2 \
+     -H "Content-Type: application/json" \
+     -d '{"role":"MODERATOR"}'
+curl -X DELETE http://localhost:8082/api/users/1
 curl http://localhost:8082/api/orders/42
 curl http://localhost:8082/api/orders/-1     # triggers 400
 
