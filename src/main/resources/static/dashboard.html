@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TraceSpring — Request Inspector</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --surface: #1e293b;
+            --surface2: #162032;
+            --border: #334155;
+            --text: #e2e8f0;
+            --muted: #94a3b8;
+            --accent: #3b82f6;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; }
+
+        /* ── Header ── */
+        header {
+            padding: 13px 24px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            display: flex; justify-content: space-between; align-items: center;
+            position: sticky; top: 0; z-index: 10;
+        }
+        header h1 { font-size: 17px; font-weight: 700; color: #60a5fa; letter-spacing: -0.3px; }
+        header .subtitle { color: var(--muted); font-size: 11px; margin-top: 2px; }
+        .header-actions { display: flex; gap: 8px; align-items: center; }
+
+        /* ── Buttons ── */
+        .btn {
+            border-radius: 6px; padding: 5px 13px; font-size: 12px;
+            cursor: pointer; border: 1px solid; font-weight: 500; transition: opacity 0.15s;
+        }
+        .btn:hover { opacity: 0.85; }
+        .btn-pause  { background: #1e3a5f; border-color: #2563eb; color: #93c5fd; }
+        .btn-resume { background: #064e3b; border-color: #059669; color: #34d399; }
+        .btn-clear  { background: #1e1e2e; border-color: var(--border); color: var(--muted); }
+        .btn-guide  { background: #1e293b; border-color: var(--border); color: var(--muted); }
+        .btn-guide.active { border-color: var(--accent); color: #93c5fd; }
+
+        /* ── Live indicator ── */
+        .live-badge {
+            background: var(--surface); border: 1px solid var(--border); border-radius: 20px;
+            padding: 4px 12px; font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 6px;
+        }
+        .dot { width: 6px; height: 6px; border-radius: 50%; }
+        .dot-live   { background: #34d399; animation: blink 1.5s infinite; }
+        .dot-paused { background: #fbbf24; }
+        .dot-error  { background: #f87171; }
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.25} }
+
+        /* ── Stats ── */
+        .stats { display: flex; gap: 12px; padding: 14px 24px; }
+        .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 11px 16px; flex: 1; }
+        .stat-card .label { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; }
+        .stat-card .value { font-size: 22px; font-weight: 700; margin-top: 4px; }
+        .stat-card .sub { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+        /* ── Guide panel ── */
+        .guide-wrap { padding: 0 24px 16px; }
+        .guide-panel {
+            background: var(--surface2); border: 1px solid var(--border);
+            border-radius: 10px; overflow: hidden;
+        }
+        .guide-grid { display: grid; grid-template-columns: 1fr 1.1fr 1fr; gap: 0; }
+        .guide-col { padding: 20px; border-right: 1px solid var(--border); }
+        .guide-col:last-child { border-right: none; }
+        .guide-col h3 {
+            font-size: 11px; text-transform: uppercase; letter-spacing: 0.7px;
+            color: var(--muted); margin-bottom: 14px; padding-bottom: 8px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        /* ── Lifecycle flow diagram ── */
+        .flow { display: flex; flex-direction: column; align-items: flex-start; gap: 0; }
+        .flow-item {
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 6px; padding: 8px 12px; width: 100%; position: relative;
+        }
+        .flow-item-title { font-size: 12px; font-weight: 600; color: var(--text); }
+        .flow-item-sub { font-size: 10px; color: var(--muted); margin-top: 2px; line-height: 1.5; }
+        .flow-item-class { font-family: monospace; font-size: 10px; color: #60a5fa; margin-top: 3px; }
+        .flow-connector {
+            display: flex; align-items: center; gap: 6px;
+            padding: 3px 0 3px 18px;
+        }
+        .flow-connector-line { width: 1px; height: 18px; background: var(--border); }
+        .flow-stage-badge {
+            font-family: monospace; font-size: 9px; color: #fbbf24;
+            background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.25);
+            border-radius: 3px; padding: 1px 5px; white-space: nowrap;
+        }
+        .flow-arrow { color: var(--muted); font-size: 11px; padding-left: 15px; line-height: 1; }
+
+        /* ── Stage reference table ── */
+        .stage-ref { display: flex; flex-direction: column; gap: 8px; }
+        .stage-entry { display: flex; gap: 10px; align-items: flex-start; }
+        .stage-num {
+            width: 18px; height: 18px; border-radius: 50%; background: rgba(59,130,246,0.2);
+            border: 1px solid rgba(59,130,246,0.4); color: #93c5fd; font-size: 10px;
+            font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px;
+        }
+        .stage-entry-content {}
+        .stage-entry-name { font-family: monospace; font-size: 10px; color: #93c5fd; font-weight: 600; }
+        .stage-entry-desc { font-size: 11px; color: var(--muted); margin-top: 1px; line-height: 1.4; }
+        .stage-entry-who  { font-size: 10px; color: #7dd3fc; margin-top: 2px; font-style: italic; }
+
+        /* ── Legend ── */
+        .legend-section { margin-bottom: 16px; }
+        .legend-section h4 { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 8px; }
+        .legend-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 11px; }
+        .legend-desc { color: var(--muted); }
+
+        .col-ref { display: flex; flex-direction: column; gap: 6px; }
+        .col-entry { display: flex; gap: 8px; align-items: flex-start; }
+        .col-name { font-family: monospace; font-size: 10px; color: #93c5fd; min-width: 80px; font-weight: 600; flex-shrink: 0; }
+        .col-desc { font-size: 11px; color: var(--muted); line-height: 1.4; }
+
+        /* ── Badges ── */
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; }
+        .m-GET    { background: #064e3b; color: #34d399; }
+        .m-POST   { background: #1e3a5f; color: #60a5fa; }
+        .m-PUT    { background: #3d2800; color: #fbbf24; }
+        .m-DELETE { background: #450a0a; color: #f87171; }
+        .m-PATCH  { background: #2e1065; color: #c084fc; }
+        .s-2xx    { background: #064e3b; color: #34d399; }
+        .s-3xx    { background: #1c3050; color: #60a5fa; }
+        .s-4xx    { background: #3d2800; color: #fbbf24; }
+        .s-5xx    { background: #450a0a; color: #f87171; }
+        .s-pend   { background: #1e293b; color: #94a3b8; }
+
+        /* ── Table ── */
+        .container { padding: 0 24px 32px; }
+        table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+        thead th { background: #0a111f; padding: 9px 14px; text-align: left; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; border-bottom: 1px solid var(--border); }
+        tbody tr.data-row { border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.12s; }
+        tbody tr.data-row:hover { background: rgba(59,130,246,0.07); }
+        tbody tr.data-row.expanded { background: rgba(59,130,246,0.13); }
+        tbody td { padding: 9px 14px; vertical-align: middle; }
+
+        /* ── Timeline (expanded row) ── */
+        .timeline-row td { padding: 0 !important; border-bottom: 1px solid var(--border); }
+        .timeline { padding: 14px 14px 16px 48px; background: #090f1a; }
+        .tl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .tl-section h4 { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 8px; }
+        .stages { display: flex; flex-direction: column; }
+        .stage-row { display: flex; align-items: flex-start; gap: 10px; }
+        .stage-track { display: flex; flex-direction: column; align-items: center; width: 10px; flex-shrink: 0; padding-top: 2px; }
+        .stage-dot  { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+        .stage-line { width: 1px; flex: 1; min-height: 12px; background: var(--border); }
+        .stage-info { padding-bottom: 10px; }
+        .stage-name  { font-family: monospace; font-size: 11px; color: #93c5fd; }
+        .stage-times { font-family: monospace; font-size: 10px; color: var(--muted); margin-top: 2px; }
+        .stage-delta { color: #fbbf24; }
+        .kv-grid { display: flex; flex-direction: column; gap: 3px; }
+        .kv { font-family: monospace; font-size: 11px; background: var(--surface); padding: 3px 8px; border-radius: 4px; word-break: break-all; }
+        .kv-key { color: var(--muted); }
+        .kv-val { color: var(--text); }
+        .exception-box { background: #450a0a; border: 1px solid #7f1d1d; padding: 7px 10px; border-radius: 5px; font-family: monospace; font-size: 11px; color: #fca5a5; margin-top: 10px; }
+
+        .no-data { text-align: center; padding: 48px; color: var(--muted); font-size: 13px; }
+        .chevron { float: right; color: var(--muted); font-size: 10px; transition: transform 0.15s; }
+        tr.expanded .chevron { transform: rotate(180deg); }
+
+        .table-toolbar {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 0 24px 10px;
+        }
+        .table-label { font-size: 12px; color: var(--muted); }
+        .table-label strong { color: var(--text); }
+    </style>
+</head>
+<body>
+
+<!-- ═══════════════ HEADER ═══════════════ -->
+<header>
+    <div>
+        <h1>TraceSpring <span style="font-weight:300;color:var(--muted)">/ HTTP Request Inspector</span></h1>
+        <div class="subtitle">Spring MVC Lifecycle Tracer — visualizes every stage of an HTTP request inside Spring</div>
+    </div>
+    <div class="header-actions">
+        <button id="btn-pause" class="btn btn-pause" onclick="togglePause()">⏸ Pause</button>
+        <button class="btn btn-clear" onclick="clearView()">⌫ Clear view</button>
+        <button id="btn-guide" class="btn btn-guide" onclick="toggleGuide()">Guide ▾</button>
+        <div class="live-badge">
+            <span id="dot" class="dot dot-live"></span>
+            <span id="lbl">Live</span>
+        </div>
+    </div>
+</header>
+
+<!-- ═══════════════ STATS ═══════════════ -->
+<div class="stats">
+    <div class="stat-card">
+        <div class="label">Total Requests</div>
+        <div class="value" id="s-total">—</div>
+        <div class="sub">all time, in memory</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">Avg Response Time</div>
+        <div class="value" id="s-avg">—</div>
+        <div class="sub">completed requests only</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">Requests — Last 60s</div>
+        <div class="value" id="s-recent">—</div>
+        <div class="sub">rolling window</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">Error Rate (4xx / 5xx)</div>
+        <div class="value" id="s-err">—</div>
+        <div class="sub">of completed requests</div>
+    </div>
+</div>
+
+<!-- ═══════════════ GUIDE PANEL ═══════════════ -->
+<div class="guide-wrap" id="guide-wrap" style="display:none">
+<div class="guide-panel">
+<div class="guide-grid">
+
+  <!-- COL 1 — How It Works -->
+  <div class="guide-col">
+    <h3>How It Works — Request Flow</h3>
+    <div class="flow">
+
+      <div class="flow-item" style="border-color:#334155">
+        <div class="flow-item-title">Incoming HTTP Request</div>
+        <div class="flow-item-sub">Browser / curl / client</div>
+      </div>
+      <div class="flow-connector">
+        <div class="flow-connector-line"></div>
+        <span class="flow-stage-badge">FILTER_START · REQUEST_RECEIVED</span>
+      </div>
+
+      <div class="flow-item" style="border-color:#2563eb">
+        <div class="flow-item-title">OncePerRequestFilter</div>
+        <div class="flow-item-sub">Assigns unique requestId, wraps request &amp; response with caching wrappers, saves trace to TraceStore</div>
+        <div class="flow-item-class">RequestTracingFilter</div>
+      </div>
+      <div class="flow-arrow">↓</div>
+
+      <div class="flow-item" style="border-color:#334155">
+        <div class="flow-item-title">DispatcherServlet</div>
+        <div class="flow-item-sub">Spring MVC's front controller — routes request to handler, drives interceptor chain</div>
+      </div>
+      <div class="flow-connector">
+        <div class="flow-connector-line"></div>
+        <span class="flow-stage-badge">INTERCEPTOR_PRE_HANDLE</span>
+      </div>
+
+      <div class="flow-item" style="border-color:#7c3aed">
+        <div class="flow-item-title">HandlerInterceptor · preHandle</div>
+        <div class="flow-item-sub">Fires before controller. Captures handler method signature (ClassName#method)</div>
+        <div class="flow-item-class">LifecycleInterceptor</div>
+      </div>
+      <div class="flow-connector">
+        <div class="flow-connector-line"></div>
+        <span class="flow-stage-badge">CONTROLLER_EXECUTION</span>
+      </div>
+
+      <div class="flow-item" style="border-color:#059669">
+        <div class="flow-item-title">AOP @Around advice</div>
+        <div class="flow-item-sub">Intercepts @RestController methods precisely at entry. Only reliable hook inside the controller</div>
+        <div class="flow-item-class">ControllerTraceAspect</div>
+      </div>
+      <div class="flow-arrow">↓</div>
+
+      <div class="flow-item" style="border-color:#334155">
+        <div class="flow-item-title">@RestController method</div>
+        <div class="flow-item-sub">Your business logic executes here</div>
+      </div>
+      <div class="flow-connector">
+        <div class="flow-connector-line"></div>
+        <span class="flow-stage-badge">INTERCEPTOR_POST_HANDLE</span>
+      </div>
+
+      <div class="flow-item" style="border-color:#7c3aed">
+        <div class="flow-item-title">HandlerInterceptor · postHandle</div>
+        <div class="flow-item-sub">Fires after controller, before view resolution. Captures response status</div>
+        <div class="flow-item-class">LifecycleInterceptor</div>
+      </div>
+      <div class="flow-connector">
+        <div class="flow-connector-line"></div>
+        <span class="flow-stage-badge">INTERCEPTOR_AFTER_COMPLETION</span>
+      </div>
+
+      <div class="flow-item" style="border-color:#7c3aed">
+        <div class="flow-item-title">HandlerInterceptor · afterCompletion</div>
+        <div class="flow-item-sub">Always fires — even on exception. Captures exception info if thrown</div>
+        <div class="flow-item-class">LifecycleInterceptor</div>
+      </div>
+      <div class="flow-connector">
+        <div class="flow-connector-line"></div>
+        <span class="flow-stage-badge">RESPONSE_SENT</span>
+      </div>
+
+      <div class="flow-item" style="border-color:#2563eb">
+        <div class="flow-item-title">Filter finally block</div>
+        <div class="flow-item-sub">Flushes cached response body to wire. Marks trace complete, records total time</div>
+        <div class="flow-item-class">RequestTracingFilter</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- COL 2 — Stage Reference -->
+  <div class="guide-col">
+    <h3>Stage Reference</h3>
+    <div class="stage-ref">
+
+      <div class="stage-entry">
+        <div class="stage-num">1</div>
+        <div class="stage-entry-content">
+          <div class="stage-entry-name">FILTER_START</div>
+          <div class="stage-entry-desc">Filter method body begins. Very first thing that runs — before anything Spring MVC does.</div>
+          <div class="stage-entry-who">Recorded by: RequestTracingFilter</div>
+        </div>
+      </div>
+
+      <div class="stage-entry">
+        <div class="stage-num">2</div>
+        <div class="stage-entry-content">
+          <div class="stage-entry-name">REQUEST_RECEIVED</div>
+          <div class="stage-entry-desc">requestId assigned, request/response wrapped in caching wrappers, trace saved to store.</div>
+          <div class="stage-entry-who">Recorded by: RequestTracingFilter</div>
+        </div>
+      </div>
+
+      <div class="stage-entry">
+        <div class="stage-num">3</div>
+        <div class="stage-entry-content">
+          <div class="stage-entry-name">INTERCEPTOR_PRE_HANDLE</div>
+          <div class="stage-entry-desc">Inside DispatcherServlet, before controller. Handler method name captured here. Return false to abort the request.</div>
+          <div class="stage-entry-who">Recorded by: LifecycleInterceptor#preHandle</div>
+        </div>
+      </div>
+
+      <div class="stage-entry">
+        <div class="stage-num">4</div>
+        <div class="stage-entry-content">
+          <div class="stage-entry-name">CONTROLLER_EXECUTION</div>
+          <div class="stage-entry-desc">Recorded at the exact moment the @RestController method body starts. Uses AOP @Around on @RestController — the only hook precise enough to capture this.</div>
+          <div class="stage-entry-who">Recorded by: ControllerTraceAspect</div>
+        </div>
+      </div>
+
+      <div class="stage-entry">
+        <div class="stage-num">5</div>
+        <div class="stage-entry-content">
+          <div class="stage-entry-name">INTERCEPTOR_POST_HANDLE</div>
+          <div class="stage-entry-desc">After controller returns, before Spring writes the response. NOT called if controller throws — use afterCompletion for guaranteed cleanup.</div>
+          <div class="stage-entry-who">Recorded by: LifecycleInterceptor#postHandle</div>
+        </div>
+      </div>
+
+      <div class="stage-entry">
+        <div class="stage-num">6</div>
+        <div class="stage-entry-content">
+          <div class="stage-entry-name">INTERCEPTOR_AFTER_COMPLETION</div>
+          <div class="stage-entry-desc">Always called — success or exception. Exception info captured here if non-null. Mirror of preHandle: every request that passed preHandle gets this.</div>
+          <div class="stage-entry-who">Recorded by: LifecycleInterceptor#afterCompletion</div>
+        </div>
+      </div>
+
+      <div class="stage-entry">
+        <div class="stage-num">7</div>
+        <div class="stage-entry-content">
+          <div class="stage-entry-name">RESPONSE_SENT</div>
+          <div class="stage-entry-desc">Filter's finally block. Cached response bytes flushed to the wire. totalExecutionMs computed here as wall-clock time from FILTER_START.</div>
+          <div class="stage-entry-who">Recorded by: RequestTracingFilter (finally)</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- COL 3 — Legends -->
+  <div class="guide-col">
+    <h3>Legend &amp; Column Reference</h3>
+
+    <!-- Method badges -->
+    <div class="legend-section">
+      <h4>HTTP Method Badges</h4>
+      <div class="legend-row"><span class="badge m-GET">GET</span> <span class="legend-desc">Read resource, no body</span></div>
+      <div class="legend-row"><span class="badge m-POST">POST</span> <span class="legend-desc">Create resource, has body</span></div>
+      <div class="legend-row"><span class="badge m-PUT">PUT</span> <span class="legend-desc">Replace resource</span></div>
+      <div class="legend-row"><span class="badge m-PATCH">PATCH</span> <span class="legend-desc">Partial update</span></div>
+      <div class="legend-row"><span class="badge m-DELETE">DELETE</span> <span class="legend-desc">Remove resource</span></div>
+    </div>
+
+    <!-- Status badges -->
+    <div class="legend-section">
+      <h4>HTTP Status Badges</h4>
+      <div class="legend-row"><span class="badge s-2xx">200</span> <span class="legend-desc">2xx — Success</span></div>
+      <div class="legend-row"><span class="badge s-3xx">302</span> <span class="legend-desc">3xx — Redirect</span></div>
+      <div class="legend-row"><span class="badge s-4xx">404</span> <span class="legend-desc">4xx — Client error</span></div>
+      <div class="legend-row"><span class="badge s-5xx">500</span> <span class="legend-desc">5xx — Server error</span></div>
+      <div class="legend-row"><span class="badge s-pend">—</span> <span class="legend-desc">In-flight / not yet set</span></div>
+    </div>
+
+    <!-- Columns -->
+    <div class="legend-section">
+      <h4>Table Columns</h4>
+      <div class="col-ref">
+        <div class="col-entry">
+          <div class="col-name">Request ID</div>
+          <div class="col-desc">UUID assigned by filter at request entry. First 8 chars shown. Click row to expand full detail.</div>
+        </div>
+        <div class="col-entry">
+          <div class="col-name">Method</div>
+          <div class="col-desc">HTTP verb captured at filter entry.</div>
+        </div>
+        <div class="col-entry">
+          <div class="col-name">Path</div>
+          <div class="col-desc">Request URI (no query string).</div>
+        </div>
+        <div class="col-entry">
+          <div class="col-name">Status</div>
+          <div class="col-desc">HTTP response status. "—" means request is still in-flight.</div>
+        </div>
+        <div class="col-entry">
+          <div class="col-name">Handler</div>
+          <div class="col-desc">ClassName#methodName of the matched @RestController method. Set in preHandle via HandlerMethod introspection.</div>
+        </div>
+        <div class="col-entry">
+          <div class="col-name">Time</div>
+          <div class="col-desc">Wall-clock ms from FILTER_START to RESPONSE_SENT (filter finally block).</div>
+        </div>
+        <div class="col-entry">
+          <div class="col-name">Stages</div>
+          <div class="col-desc">Number of lifecycle stages recorded out of 7. &lt;7 means request still in-flight or was aborted.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Endpoints -->
+    <div class="legend-section">
+      <h4>Available Endpoints</h4>
+      <div class="col-ref">
+        <div class="col-entry">
+          <div class="col-name" style="color:#34d399">GET</div>
+          <div class="col-desc"><code style="font-family:monospace">/api/users</code> — list users</div>
+        </div>
+        <div class="col-entry">
+          <div class="col-name" style="color:#60a5fa">POST</div>
+          <div class="col-desc"><code style="font-family:monospace">/api/users</code> — create user</div>
+        </div>
+        <div class="col-entry">
+          <div class="col-name" style="color:#34d399">GET</div>
+          <div class="col-desc"><code style="font-family:monospace">/api/orders/{id}</code> — get order</div>
+        </div>
+        <div class="col-entry">
+          <div class="col-name" style="color:#34d399">GET</div>
+          <div class="col-desc"><code style="font-family:monospace">/debug/traces</code> — all traces JSON</div>
+        </div>
+        <div class="col-entry">
+          <div class="col-name" style="color:#34d399">GET</div>
+          <div class="col-desc"><code style="font-family:monospace">/debug/traces/{id}</code> — single trace</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /guide-col -->
+
+</div><!-- /guide-grid -->
+</div><!-- /guide-panel -->
+</div><!-- /guide-wrap -->
+
+<!-- ═══════════════ TABLE TOOLBAR ═══════════════ -->
+<div class="table-toolbar">
+    <div class="table-label">
+        Showing <strong id="lbl-count">0</strong> requests &nbsp;·&nbsp; click any row to expand lifecycle timeline
+    </div>
+</div>
+
+<!-- ═══════════════ TRACE TABLE ═══════════════ -->
+<div class="container">
+    <table>
+        <thead>
+            <tr>
+                <th>Request ID ↓ newest first</th>
+                <th>Method</th>
+                <th>Path</th>
+                <th>Status</th>
+                <th>Handler (Class#method)</th>
+                <th>Time (ms)</th>
+                <th>Stages / 7</th>
+            </tr>
+        </thead>
+        <tbody id="tbody">
+            <tr><td colspan="7" class="no-data">No requests yet — hit <code>/api/users</code>, <code>/api/orders/1</code>, or any <code>/api/*</code> endpoint</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- ═══════════════ SCRIPT ═══════════════ -->
+<script>
+    let expanded    = null;
+    let hidden      = new Set();
+    let cache       = [];
+    let paused      = false;
+    let guideOpen   = false;
+    let sessionStart = Date.now();   // traces older than this are ignored on load/clear
+
+    const STAGES = [
+        'FILTER_START','REQUEST_RECEIVED','INTERCEPTOR_PRE_HANDLE',
+        'CONTROLLER_EXECUTION','INTERCEPTOR_POST_HANDLE',
+        'INTERCEPTOR_AFTER_COMPLETION','RESPONSE_SENT'
+    ];
+
+    // ── Pause / Resume ──────────────────────────────────────
+    window.togglePause = function () {
+        paused = !paused;
+        const btn = document.getElementById('btn-pause');
+        const dot = document.getElementById('dot');
+        const lbl = document.getElementById('lbl');
+        if (paused) {
+            btn.textContent = '▶ Resume';
+            btn.className   = 'btn btn-resume';
+            dot.className   = 'dot dot-paused';
+            lbl.textContent = 'Paused';
+        } else {
+            btn.textContent = '⏸ Pause';
+            btn.className   = 'btn btn-pause';
+            dot.className   = 'dot dot-live';
+            lbl.textContent = 'Live';
+            fetchTraces();   // immediate refresh on resume
+        }
+    };
+
+    // ── Guide toggle ─────────────────────────────────────────
+    window.toggleGuide = function () {
+        guideOpen = !guideOpen;
+        document.getElementById('guide-wrap').style.display = guideOpen ? 'block' : 'none';
+        const btn = document.getElementById('btn-guide');
+        btn.textContent = guideOpen ? 'Guide ▴' : 'Guide ▾';
+        btn.classList.toggle('active', guideOpen);
+    };
+
+    // ── Clear view ───────────────────────────────────────────
+    window.clearView = function () {
+        sessionStart = Date.now();   // reset session — everything before now is ignored
+        hidden.clear();
+        expanded = null;
+        render(cache);
+    };
+
+    // ── Status class helper ──────────────────────────────────
+    function statusCls(code) {
+        if (!code || code === 0) return 's-pend';
+        if (code < 300) return 's-2xx';
+        if (code < 400) return 's-3xx';
+        if (code < 500) return 's-4xx';
+        return 's-5xx';
+    }
+
+    // ── Stage timeline HTML ──────────────────────────────────
+    function stageHtml(stages, startMs) {
+        const keys = STAGES.filter(s => s in stages);
+        return keys.map((name, i) => {
+            const ts    = stages[name];
+            const delta = ts - startMs;
+            const d     = new Date(ts);
+            const clock = [d.getHours(), d.getMinutes(), d.getSeconds()]
+                            .map(x => String(x).padStart(2, '0')).join(':')
+                          + '.' + String(d.getMilliseconds()).padStart(3, '0');
+            const isLast = i === keys.length - 1;
+            return `
+              <div class="stage-row">
+                <div class="stage-track">
+                  <div class="stage-dot"></div>
+                  ${isLast ? '' : '<div class="stage-line"></div>'}
+                </div>
+                <div class="stage-info">
+                  <div class="stage-name">${name}</div>
+                  <div class="stage-times">${clock} &nbsp;<span class="stage-delta">+${delta}ms</span></div>
+                </div>
+              </div>`;
+        }).join('');
+    }
+
+    // ── Key-value HTML ───────────────────────────────────────
+    function kvHtml(obj) {
+        const entries = Object.entries(obj || {});
+        if (!entries.length) return '<span style="color:var(--muted);font-size:11px">—</span>';
+        return entries.map(([k, v]) =>
+            `<div class="kv"><span class="kv-key">${k}: </span><span class="kv-val">${v}</span></div>`
+        ).join('');
+    }
+
+    // ── Expanded timeline row HTML ───────────────────────────
+    function timelineHtml(t) {
+        return `
+          <div class="timeline">
+            <div class="tl-grid">
+              <div class="tl-section">
+                <h4>Lifecycle Stages</h4>
+                <div class="stages">${stageHtml(t.stageTimestamps || {}, t.startTimeMs)}</div>
+                ${t.exceptionInfo ? `<div class="exception-box">&#9888; ${t.exceptionInfo}</div>` : ''}
+              </div>
+              <div>
+                <div class="tl-section" style="margin-bottom:16px">
+                  <h4>Request Headers</h4>
+                  <div class="kv-grid">${kvHtml(t.headers)}</div>
+                </div>
+                <div class="tl-section">
+                  <h4>Query Params</h4>
+                  <div class="kv-grid">${kvHtml(t.queryParams)}</div>
+                </div>
+              </div>
+            </div>
+          </div>`;
+    }
+
+    // ── Render table ─────────────────────────────────────────
+    function render(traces) {
+        const tbody   = document.getElementById('tbody');
+        const visible = traces.filter(t => t.startTimeMs >= sessionStart && !hidden.has(t.requestId));
+
+        document.getElementById('lbl-count').textContent = visible.length;
+
+        if (!visible.length) {
+            tbody.innerHTML = '<tr><td colspan="7" class="no-data">No requests yet — hit <code>/api/users</code>, <code>/api/orders/1</code>, or any <code>/api/*</code> endpoint</td></tr>';
+            return;
+        }
+
+        const sorted = [...visible].sort((a, b) => b.startTimeMs - a.startTimeMs);
+        const rows   = [];
+
+        sorted.forEach(t => {
+            const stageCount = Object.keys(t.stageTimestamps || {}).length;
+            const isExp      = expanded === t.requestId;
+            const stageColor = stageCount === 7 ? '#34d399' : stageCount >= 4 ? '#fbbf24' : '#f87171';
+            rows.push(`
+              <tr class="data-row ${isExp ? 'expanded' : ''}" onclick="toggle('${t.requestId}')">
+                <td style="font-family:monospace;font-size:11px;color:var(--muted)">
+                  ${t.requestId.substring(0, 8)}…
+                  <span class="chevron">▼</span>
+                </td>
+                <td><span class="badge m-${t.method}">${t.method}</span></td>
+                <td style="font-family:monospace">${t.path}</td>
+                <td><span class="badge ${statusCls(t.responseStatus)}">${t.responseStatus || '—'}</span></td>
+                <td style="font-family:monospace;font-size:11px;color:var(--muted)">${t.handlerMethod || '—'}</td>
+                <td style="font-family:monospace">${t.completed ? t.totalExecutionMs + 'ms' : '<span style="color:var(--muted)">…</span>'}</td>
+                <td style="font-family:monospace;color:${stageColor}">${stageCount} / 7</td>
+              </tr>`);
+            if (isExp) {
+                rows.push(`<tr class="timeline-row"><td colspan="7">${timelineHtml(t)}</td></tr>`);
+            }
+        });
+
+        tbody.innerHTML = rows.join('');
+    }
+
+    // ── Update stats bar ─────────────────────────────────────
+    function updateStats(traces) {
+        const now     = Date.now();
+        const session = traces.filter(t => t.startTimeMs >= sessionStart);
+        const done    = session.filter(t => t.completed);
+        document.getElementById('s-total').textContent  = session.length;
+        document.getElementById('s-recent').textContent = session.filter(t => now - t.startTimeMs < 60000).length;
+        if (done.length) {
+            const avg    = Math.round(done.reduce((s, t) => s + t.totalExecutionMs, 0) / done.length);
+            const errPct = ((done.filter(t => t.responseStatus >= 400).length / done.length) * 100).toFixed(0);
+            document.getElementById('s-avg').textContent = avg + 'ms';
+            document.getElementById('s-err').textContent = errPct + '%';
+        }
+    }
+
+    // ── Toggle row expand ────────────────────────────────────
+    window.toggle = function (id) {
+        expanded = expanded === id ? null : id;
+        render(cache);
+    };
+
+    // ── Fetch from server ────────────────────────────────────
+    async function fetchTraces() {
+        if (paused) return;
+        try {
+            const res    = await fetch('/debug/traces');
+            const traces = await res.json();
+            cache = traces;
+            render(traces);
+            updateStats(traces);
+            const dot = document.getElementById('dot');
+            const lbl = document.getElementById('lbl');
+            if (!paused) { dot.className = 'dot dot-live'; lbl.textContent = 'Live'; }
+        } catch {
+            document.getElementById('dot').className = 'dot dot-error';
+            document.getElementById('lbl').textContent = 'Disconnected';
+        }
+    }
+
+    fetchTraces();
+    setInterval(fetchTraces, 2000);
+</script>
+</body>
+</html>
